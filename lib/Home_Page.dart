@@ -224,7 +224,7 @@ class _HomePageState extends State<HomePage> {
       body: SafeArea(
         child: Align(
           alignment: Alignment.topCenter,
-          child: SingleChildScrollView(
+            child: SingleChildScrollView(
             padding: EdgeInsets.symmetric(horizontal: hPad), // mantém silvio/graphic
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 1080),
