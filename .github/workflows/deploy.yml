@@ -1,18 +1,12 @@
-name: Deploy Flutter Web to GitHub Pages
+name: Deploy Flutter Web (gh-pages)
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
+  contents: write
 
 jobs:
   build:
@@ -20,12 +14,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Configure Pages
-        uses: actions/configure-pages@v4
-        with:
-          enablement: true
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -41,21 +29,18 @@ jobs:
           key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-pub-
+      - name: Flutter doctor
+        run: flutter doctor -v
       - name: Fetch dependencies
         run: flutter pub get
       - name: Build web
         run: flutter build web --release --base-href "/${{ github.event.repository.name }}/"
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: List build output
+        run: ls -R build/web | head -n 100 || find build/web -maxdepth 2 -type f | head -n 100
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v3
         with:
-          path: build/web
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: build/web
+          force_orphan: true
+          commit_message: "deploy: ${{ github.sha }}"
