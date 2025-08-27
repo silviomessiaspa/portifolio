@@ -268,8 +268,7 @@ class _HomePageState extends State<HomePage> {
                   const SizedBox(height: 28),
 
                   /// Citação (exibia só em desktop; agora também no mobile, com layout adaptado)
-                  if (isPhone)
-                    _QuoteMobile(),
+                  if (isPhone) _QuoteMobile(),
 
                   /// Herói
                   _HeroSection(
@@ -357,14 +356,9 @@ class _HeroSection extends StatelessWidget {
     return SizedBox(
       height: heroHeight,
       width: double.infinity,
-      child: GestureDetector(
-        onTapDown: (_) => onHoverChanged(true),
-        onTapUp: (_) => onHoverChanged(false),
-        onTapCancel: () => onHoverChanged(false),
-        onPanDown: (_) => onHoverChanged(true),
-        onPanEnd: (_) => onHoverChanged(false),
-        onPanCancel: () => onHoverChanged(false),
-        behavior: HitTestBehavior.translucent,
+      child: Listener(
+        onPointerDown: (_) => onHoverChanged(true),
+        onPointerUp: (_) => onHoverChanged(false),
         child: Stack(
         alignment: Alignment.center,
         clipBehavior: Clip.none,
@@ -522,35 +516,46 @@ class _QuoteMobile extends StatelessWidget {
   Widget build(BuildContext context) {
     final textStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
           fontWeight: FontWeight.w400,
-          height: 1.20,
+          height: 1.18,
           color: Colors.black87,
         );
     return Padding(
       padding: const EdgeInsets.only(bottom: 24),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ShaderMask(
-            shaderCallback: (bounds) => kTitleGradient.createShader(Offset.zero & bounds.size),
-            blendMode: BlendMode.srcIn,
-            child: Transform(
-              alignment: Alignment.topCenter,
-              transform: Matrix4.identity()..scale(-1.0, 1.0, 1.0),
-              child: const Icon(
-                Icons.format_quote,
-                size: 56,
-                color: Colors.white,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 300),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Ajuste de alinhamento vertical do ícone (levemente acima)
+              Transform.translate(
+                offset: const Offset(0, -6),
+                child: ShaderMask(
+                  shaderCallback: (bounds) => kTitleGradient.createShader(Offset.zero & bounds.size),
+                  blendMode: BlendMode.srcIn,
+                  child: Transform(
+                    alignment: Alignment.topCenter,
+                    transform: Matrix4.identity()..scale(-1.0, 1.0, 1.0),
+                    child: const Icon(
+                      Icons.format_quote,
+                      size: 56,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Extremamente competente em várias frentes de conhecimento multimídia podendo entregar de ilustração 2d a complexas modelagens 3d, jogos, vídeos, animações e broadcast design.',
+                  textAlign: TextAlign.justify,
+                  style: textStyle,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              'Extremamente competente em várias frentes de conhecimento multimídia podendo entregar de ilustração 2d a complexas modelagens 3d, jogos, vídeos, animações e broadcast design.',
-              style: textStyle,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
