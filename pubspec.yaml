@@ -55,5 +55,7 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/images/eusilvio.png        # sua foto recortada (PNG)
-    - assets/images/traos.png              # opcional
+    # Incluir automaticamente TODOS os arquivos dentro de assets/images/
+    # Assim não é necessário adicionar manualmente cada nova imagem.
+    - assets/images/
+

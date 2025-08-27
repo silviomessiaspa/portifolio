@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:convert';
+import 'dart:ui' show PointerDeviceKind; // para habilitar drag com mouse na galeria
+import 'dart:math' as math; // para calcular altura máxima dinamicamente
 
 /// =======================
 /// Identidade de cores
@@ -72,19 +75,77 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   bool _photoHovered = false;
 
-  final List<String> _gallery = const [
-    'https://images.unsplash.com/photo-1501785888041-af3ef285b470?q=80&w=1200',
-    'https://images.unsplash.com/photo-1482192596544-9eb780fc7f66?q=80&w=1200',
-    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=1200',
-    'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?q=80&w=1200',
-    'https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?q=80&w=1200',
-  ];
+  // Lista dinâmica da galeria (primeiro item é destaque fixo se existir)
+  List<String> _gallery = [];
+
+  static const String _highlight = 'assets/images/graphic_design.png';
+  static const Set<String> _exclude = {
+    'assets/images/eusilvio.png',
+    'assets/images/traos.png',
+  }; // imagens usadas no herói e que não devem aparecer no carrossel
+
+  @override
+  void initState() {
+    super.initState();
+    _loadGallery();
+  }
+
+  Future<void> _loadGallery() async {
+    try {
+      final manifestRaw = await rootBundle.loadString('AssetManifest.json');
+      final Map<String, dynamic> manifestMap = json.decode(manifestRaw) as Map<String, dynamic>;
+      final List<String> all = manifestMap.keys
+          .where((k) => k.startsWith('assets/images/'))
+          .toList();
+      // Filtra excluídas e separa lista sem highlight
+      final List<String> others = all.where((a) => !_exclude.contains(a) && a != _highlight).toList();
+
+      int _extractPrefix(String path) {
+        final file = path.split('/').last; // ex: 001_cartaz.png
+        final match = RegExp(r'^(\d{1,6})').firstMatch(file);
+        if (match != null) {
+          return int.tryParse(match.group(1)!) ?? 999999; // fallback grande
+        }
+        return 999999; // sem prefixo vai para o fim mantendo ordem relativa
+      }
+
+      others.sort((a, b) {
+        final pa = _extractPrefix(a);
+        final pb = _extractPrefix(b);
+        if (pa != pb) return pa.compareTo(pb);
+        return a.compareTo(b); // desempate alfabético
+      });
+
+      final List<String> built = [];
+      if (all.contains(_highlight)) built.add(_highlight); // destaque primeiro sempre
+      built.addAll(others);
+
+      if (mounted) {
+        setState(() => _gallery = built);
+        // Pre-cache diferido (após frame) para demais imagens
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          for (final a in built.where((e) => e != _highlight)) {
+            precacheImage(AssetImage(a), context);
+          }
+        });
+      }
+    } catch (e) {
+      // ignore: avoid_print
+      print('[GALERIA] Falha ao carregar manifest: $e');
+    }
+  }
 
   @override
   void didChangeDependencies() {
     // Pré-cache das imagens locais
     precacheImage(const AssetImage('assets/images/eusilvio.png'), context);
     precacheImage(const AssetImage('assets/images/traos.png'), context);
+    // Destaque (se existir)
+    precacheImage(const AssetImage('assets/images/graphic_design.png'), context,
+        onError: (e, _) {
+      // ignore: avoid_print
+      print('[HIGHLIGHT] Erro ao precache graphic_design.png: $e');
+    });
     super.didChangeDependencies();
   }
 
@@ -290,25 +351,91 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  SizedBox(
-                    height: isPhone ? 160 : 180,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      padding: EdgeInsets.symmetric(horizontal: isPhone ? 4 : 8),
-                      itemCount: _gallery.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 12),
-                      itemBuilder: (context, i) {
-                        return ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.network(
-                            _gallery[i],
-                            width: isPhone ? 140 : 220,
-                            height: isPhone ? 160 : 180,
-                            fit: BoxFit.cover,
+                  Builder(
+                    builder: (context) {
+                      // Definição de alturas por item: assets (verticais) podem pedir mais altura.
+                      double itemHeightFor(String path) {
+                        final bool isAsset = path.startsWith('assets/');
+                        if (isAsset) return isPhone ? 240 : 320; // altura maior para o asset vertical
+                        return isPhone ? 160 : 180; // padrão dos placeholders
+                      }
+                      final double galleryHeight = _gallery
+                          .map(itemHeightFor)
+                          .fold<double>(0, (m, h) => math.max(m, h));
+                      return SizedBox(
+                        height: galleryHeight,
+                        child: ScrollConfiguration(
+                          behavior: ScrollConfiguration.of(context).copyWith(
+                            dragDevices: {
+                              PointerDeviceKind.touch,
+                              PointerDeviceKind.mouse,
+                              PointerDeviceKind.stylus,
+                              PointerDeviceKind.unknown,
+                            },
                           ),
-                        );
-                      },
-                    ),
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            padding: EdgeInsets.symmetric(horizontal: isPhone ? 4 : 8),
+                            itemCount: _gallery.length,
+                            separatorBuilder: (_, __) => const SizedBox(width: 12),
+                            itemBuilder: (context, i) {
+                              if (_gallery.isEmpty) {
+                                return const SizedBox();
+                              }
+                              final path = _gallery[i];
+                              final bool isAsset = path.startsWith('assets/');
+                              final double targetHeight = itemHeightFor(path);
+                              // Novo comportamento: preservar altura total e permitir que a largura
+                              // se expanda conforme proporção (sem recorte vertical).
+                              final Widget imageWidget = isAsset
+                                  ? Image.asset(
+                                      path,
+                                      height: targetHeight,
+                                      fit: BoxFit.fitHeight,
+                                      errorBuilder: (c, err, st) => Container(
+                                        color: Colors.red.withOpacity(.1),
+                                        alignment: Alignment.center,
+                                        height: targetHeight,
+                                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                                        child: const Text(
+                                          'Erro ao carregar',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(fontSize: 10, color: Colors.red),
+                                        ),
+                                      ),
+                                    )
+                                  : Image.network(
+                                      path,
+                                      height: targetHeight,
+                                      fit: BoxFit.fitHeight,
+                                    );
+                              return InkWell(
+                                // Mantém regra: primeira é destaque e não abre; demais abrem pilha
+                                onTap: (i == 0 || _gallery.length <= 1)
+                                    ? null
+                                    : () {
+                                        final filtered = _gallery.sublist(1); // sem destaque
+                                        final openIndex = i - 1;
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => FullGalleryPage(
+                                              images: filtered,
+                                              initialIndex: openIndex.clamp(0, filtered.length - 1),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                borderRadius: BorderRadius.circular(12),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: imageWidget,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      );
+                    },
                   ),
 
                   const SizedBox(height: 48),
@@ -359,7 +486,10 @@ class _HeroSection extends StatelessWidget {
       child: Listener(
         onPointerDown: (_) => onHoverChanged(true),
         onPointerUp: (_) => onHoverChanged(false),
-        child: Stack(
+        child: Transform.translate(
+          // Eleva todo o conjunto (blob + imagens) um pouco para cima
+          offset: Offset(0, isPhone ? -20 : -36),
+          child: Stack(
         alignment: Alignment.center,
         clipBehavior: Clip.none,
         children: [
@@ -411,14 +541,23 @@ class _HeroSection extends StatelessWidget {
                           opacity: hovered ? 1 : 0.0,
                           duration: const Duration(milliseconds: 220),
                           curve: Curves.easeInOut,
-                          child: AnimatedScale(
-                            scale: hovered ? 1.0 : 0.85,
-                            duration: const Duration(milliseconds: 420),
-                            curve: Curves.elasticOut,
-                            child: Image.asset(
-                              'assets/images/traos.png',
-                              height: isPhone ? 320 : 540,
-                              fit: BoxFit.contain,
+                          child: AnimatedSlide(
+                            offset: hovered ? const Offset(0, -0.05) : const Offset(0, 0),
+                            duration: const Duration(milliseconds: 500),
+                            curve: Curves.easeOutQuad,
+                            child: AnimatedScale(
+                              alignment: Alignment.bottomCenter,
+                // Escala diferenciada: mobile mantém efeito maior, desktop fica mais sutil
+                scale: hovered
+                  ? (isPhone ? 1.15 : 1.05)
+                  : (isPhone ? 0.80 : 0.85),
+                              duration: const Duration(milliseconds: 520),
+                              curve: Curves.elasticOut,
+                              child: Image.asset(
+                                'assets/images/traos.png',
+                                height: isPhone ? 320 : 540,
+                                fit: BoxFit.contain,
+                              ),
                             ),
                           ),
                         ),
@@ -466,7 +605,8 @@ class _HeroSection extends StatelessWidget {
               top: 16,
               child: ConstrainedBox(
                 // Reduz a largura para evitar que o texto vá por trás da imagem
-                constraints: const BoxConstraints(maxWidth: 240),
+                // Aumentado (antes 240) para dar mais respiro ao texto no desktop
+                constraints: const BoxConstraints(maxWidth: 300),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -504,6 +644,7 @@ class _HeroSection extends StatelessWidget {
               ),
             ),
         ],
+          ),
         ),
       ),
     );
@@ -549,8 +690,61 @@ class _QuoteMobile extends StatelessWidget {
               Expanded(
                 child: Text(
                   'Extremamente competente em várias frentes de conhecimento multimídia podendo entregar de ilustração 2d a complexas modelagens 3d, jogos, vídeos, animações e broadcast design.',
-                  textAlign: TextAlign.justify,
+                  // Removido justify no mobile; alinhamento padrão à esquerda para melhor legibilidade
+                  textAlign: TextAlign.start,
                   style: textStyle,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Página de visualização completa da galeria (todas as imagens em coluna)
+class FullGalleryPage extends StatelessWidget {
+  final List<String> images;
+  final int initialIndex;
+  const FullGalleryPage({super.key, required this.images, this.initialIndex = 0});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      backgroundColor: Colors.white,
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: theme.colorScheme.primary,
+        onPressed: () => Navigator.of(context).maybePop(),
+        child: const Icon(Icons.arrow_back),
+      ),
+      body: SafeArea(
+        child: Scrollbar(
+          thumbVisibility: true,
+          child: CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
+                sliver: SliverList.builder(
+                  itemCount: images.length,
+                  itemBuilder: (context, index) {
+                    final path = images[index];
+                    final isAsset = path.startsWith('assets/');
+                    final Widget child = isAsset
+                        ? Image.asset(path, fit: BoxFit.contain)
+                        : Image.network(path, fit: BoxFit.cover);
+                    return Padding(
+                      padding: EdgeInsets.only(top: index == 0 ? 0 : 16),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: ColoredBox(
+                          color: Colors.grey.shade100,
+                          child: child,
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
             ],
