@@ -267,6 +267,10 @@ class _HomePageState extends State<HomePage> {
 
                   const SizedBox(height: 28),
 
+                  /// Citação (exibia só em desktop; agora também no mobile, com layout adaptado)
+                  if (isPhone)
+                    _QuoteMobile(),
+
                   /// Herói
                   _HeroSection(
                     isPhone: isPhone,
@@ -353,7 +357,15 @@ class _HeroSection extends StatelessWidget {
     return SizedBox(
       height: heroHeight,
       width: double.infinity,
-      child: Stack(
+      child: GestureDetector(
+        onTapDown: (_) => onHoverChanged(true),
+        onTapUp: (_) => onHoverChanged(false),
+        onTapCancel: () => onHoverChanged(false),
+        onPanDown: (_) => onHoverChanged(true),
+        onPanEnd: (_) => onHoverChanged(false),
+        onPanCancel: () => onHoverChanged(false),
+        behavior: HitTestBehavior.translucent,
+        child: Stack(
         alignment: Alignment.center,
         clipBehavior: Clip.none,
         children: [
@@ -497,6 +509,47 @@ class _HeroSection extends StatelessWidget {
                 ),
               ),
             ),
+        ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Versão da citação para mobile (fora do Stack para evitar sobreposição e permitir scroll natural)
+class _QuoteMobile extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final textStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+          fontWeight: FontWeight.w400,
+          height: 1.20,
+          color: Colors.black87,
+        );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ShaderMask(
+            shaderCallback: (bounds) => kTitleGradient.createShader(Offset.zero & bounds.size),
+            blendMode: BlendMode.srcIn,
+            child: Transform(
+              alignment: Alignment.topCenter,
+              transform: Matrix4.identity()..scale(-1.0, 1.0, 1.0),
+              child: const Icon(
+                Icons.format_quote,
+                size: 56,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'Extremamente competente em várias frentes de conhecimento multimídia podendo entregar de ilustração 2d a complexas modelagens 3d, jogos, vídeos, animações e broadcast design.',
+              style: textStyle,
+            ),
+          ),
         ],
       ),
     );
