@@ -1,5 +1,5 @@
-name: my_web_app
-description: "A new Flutter project."
+name: Portifolio_Silvio_Duarte
+description: "site do produtor multimídia Silvio Duarte"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -35,6 +35,7 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   google_fonts: ^6.1.0
+  flutter_svg: ^2.0.10+1
 
 dev_dependencies:
   flutter_test:
@@ -58,4 +59,10 @@ flutter:
     # Incluir automaticamente TODOS os arquivos dentro de assets/images/
     # Assim não é necessário adicionar manualmente cada nova imagem.
     - assets/images/
+    - assets/pdf/
+    - assets/svg/
+    
+
+
+
 

@@ -1,0 +1,19 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Flutter Web (porta 8080)",
+			"type": "shell",
+			"command": "flutter",
+			"args": [
+				"run",
+				"-d",
+				"web-server",
+				"--web-port=8080",
+				"--web-enable-expression-evaluation"
+			],
+			"isBackground": true,
+			"group": "build"
+		}
+	]
+}

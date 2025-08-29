@@ -1,11 +1,11 @@
 {
-    "name": "my_web_app",
-    "short_name": "my_web_app",
+    "name": "Portifolio_Silvio_Duarte",
+    "short_name": "Portifolio_Silvio_Duarte",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "site do produtor multimídia Silvio Duarte",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

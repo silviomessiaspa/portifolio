@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:convert';
-import 'dart:ui' show PointerDeviceKind; // para habilitar drag com mouse na galeria
+import 'package:flutter_svg/flutter_svg.dart';
+// Abrir links no Web sem depender de plugin (url_launcher não adicionado)
+// Abstrai abertura de URLs para evitar conflito com compilação WASM
+import 'url_opener_stub.dart' if (dart.library.html) 'url_opener_web.dart';
+import 'dart:convert'; // para ler AssetManifest
+import 'dart:ui' show PointerDeviceKind, ImageFilter; // para blur e dispositivos
 import 'dart:math' as math; // para calcular altura máxima dinamicamente
 
 /// =======================
@@ -75,10 +79,12 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   bool _photoHovered = false;
 
-  // Lista dinâmica da galeria (primeiro item é destaque fixo se existir)
-  List<String> _gallery = [];
+  // Galeria A (sufixo -a) e Galeria B (sufixo -b)
+  List<String> _galleryA = [];
+  List<String> _galleryB = [];
 
   static const String _highlight = 'assets/images/graphic_design.png';
+  static const String _highlightB = 'assets/images/roll2.png';
   static const Set<String> _exclude = {
     'assets/images/eusilvio.png',
     'assets/images/traos.png',
@@ -87,75 +93,114 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _loadGallery();
+    _loadGalleryDynamic();
   }
 
-  Future<void> _loadGallery() async {
+  // Carrega dinamicamente usando AssetManifest para incluir novas imagens adicionadas na pasta.
+  Future<void> _loadGalleryDynamic() async {
     try {
       final manifestRaw = await rootBundle.loadString('AssetManifest.json');
       final Map<String, dynamic> manifestMap = json.decode(manifestRaw) as Map<String, dynamic>;
-      final List<String> all = manifestMap.keys
-          .where((k) => k.startsWith('assets/images/'))
-          .toList();
-      // Filtra excluídas e separa lista sem highlight
-      final List<String> others = all.where((a) => !_exclude.contains(a) && a != _highlight).toList();
+          // ===== SEPARAÇÃO POR SUFIXO -a / -b =====
+          final allImageKeys = manifestMap.keys
+              .where((k) => k.startsWith('assets/images/') && (k.endsWith('.png') || k.endsWith('.webp') || k.endsWith('.jpg') || k.endsWith('.jpeg')))
+              .where((k) => !_exclude.contains(k))
+              .toList();
 
-      int _extractPrefix(String path) {
-        final file = path.split('/').last; // ex: 001_cartaz.png
-        final match = RegExp(r'^(\d{1,6})').firstMatch(file);
-        if (match != null) {
-          return int.tryParse(match.group(1)!) ?? 999999; // fallback grande
-        }
-        return 999999; // sem prefixo vai para o fim mantendo ordem relativa
-      }
-
-      others.sort((a, b) {
-        final pa = _extractPrefix(a);
-        final pb = _extractPrefix(b);
-        if (pa != pb) return pa.compareTo(pb);
-        return a.compareTo(b); // desempate alfabético
-      });
-
-      final List<String> built = [];
-      if (all.contains(_highlight)) built.add(_highlight); // destaque primeiro sempre
-      built.addAll(others);
-
-      if (mounted) {
-        setState(() => _gallery = built);
-        // Pre-cache diferido (após frame) para demais imagens
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          for (final a in built.where((e) => e != _highlight)) {
-            precacheImage(AssetImage(a), context);
+          final regexTag = RegExp(r'^(\d{1,6})(?:[ _-]?)([ab])', caseSensitive: false);
+          int extractNumber(String path) {
+            final file = path.split('/').last.toLowerCase();
+            if (file == 'graphic_design.png') return -1; // força destaque primeiro
+            final m = regexTag.firstMatch(file);
+            if (m != null) return int.tryParse(m.group(1)!) ?? 999999;
+            final plain = RegExp(r'^(\d{1,6})').firstMatch(file);
+            if (plain != null) return int.tryParse(plain.group(1)!) ?? 999999;
+            return 999999;
           }
-        });
+
+          final listA = <String>[];
+          final listB = <String>[];
+          for (final k in allImageKeys) {
+            final file = k.split('/').last.toLowerCase();
+            if (k == _highlight) { listA.add(k); continue; }
+            final m = regexTag.firstMatch(file);
+            if (m != null) {
+              final tag = m.group(2)!.toLowerCase();
+                if (tag == 'a') listA.add(k); else if (tag == 'b') listB.add(k);
+              continue;
+            }
+          }
+
+          listA.sort((a,b){final na=extractNumber(a);final nb=extractNumber(b); if(na!=nb) return na.compareTo(nb); return a.compareTo(b);} );
+          listB.sort((a,b){final na=extractNumber(a);final nb=extractNumber(b); if(na!=nb) return na.compareTo(nb); return a.compareTo(b);} );
+
+          // Monta com destaque fixo na A
+          final builtA = <String>[];
+          if (listA.contains(_highlight)) builtA.add(_highlight); else if (allImageKeys.contains(_highlight)) builtA.add(_highlight);
+          builtA.addAll(listA.where((e) => e != _highlight));
+
+          // Garante inclusão do destaque B (roll2.png) mesmo sem sufixo -b
+          if (allImageKeys.contains(_highlightB) && !listB.contains(_highlightB)) {
+            listB.insert(0, _highlightB);
+          }
+          // Escolha de destaque da B: prioridade roll2.png exato, depois qualquer contendo 'roll2', senão primeiro
+          String roll2 = '';
+          if (listB.contains(_highlightB)) {
+            roll2 = _highlightB;
+          } else {
+            roll2 = listB.firstWhere(
+              (p)=> p.split('/').last.toLowerCase().contains('roll2'),
+              orElse: ()=> listB.isNotEmpty? listB.first : ''
+            );
+          }
+          final builtB = <String>[];
+          if (roll2.isNotEmpty) builtB.add(roll2);
+          builtB.addAll(listB.where((e)=> e!= roll2));
+
+          // Logs
+          // ignore: avoid_print
+          print('[GALERIA][DEBUG] A=${builtA.length} B=${builtB.length} sampleA=${builtA.take(4).join(', ')} sampleB=${builtB.take(4).join(', ')}');
+
+      if (!mounted) return;
+      setState(() {
+        _galleryA = builtA;
+        _galleryB = builtB;
+      });
+      // Logs de diagnóstico (aparecem apenas em debug)
+      // ignore: avoid_print
+  print('[GALERIA] listas => A=${_galleryA.length} B=${_galleryB.length}');
+
+      // Fallback simples se nada carregou (evita tela vazia)
+    if (_galleryA.isEmpty) {
+        const fallback = [
+          'assets/images/graphic_design.png',
+          'assets/images/001_toca_pará_002.png',
+          'assets/images/002_Ativo2.png',
+        ];
+        final filtered = fallback.where((e) => manifestMap.containsKey(e)).toList();
+        if (filtered.isNotEmpty) {
+      setState(() => _galleryA = filtered);
+          // ignore: avoid_print
+          print('[GALERIA][FALLBACK] Aplicado (${filtered.length} itens).');
+        }
       }
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+  for (final a in builtA.skip(1)) { precacheImage(AssetImage(a), context); }
+  for (final b in builtB.skip(1)) { precacheImage(AssetImage(b), context); }
+      });
     } catch (e) {
       // ignore: avoid_print
-      print('[GALERIA] Falha ao carregar manifest: $e');
+      print('[GALERIA] Erro ao carregar manifest: $e');
     }
   }
-
-  @override
-  void didChangeDependencies() {
-    // Pré-cache das imagens locais
-    precacheImage(const AssetImage('assets/images/eusilvio.png'), context);
-    precacheImage(const AssetImage('assets/images/traos.png'), context);
-    // Destaque (se existir)
-    precacheImage(const AssetImage('assets/images/graphic_design.png'), context,
-        onError: (e, _) {
-      // ignore: avoid_print
-      print('[HIGHLIGHT] Erro ao precache graphic_design.png: $e');
-    });
-    super.didChangeDependencies();
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final width = MediaQuery.of(context).size.width;
     final isPhone = width < _bpSmall;
-    final double hPad = isPhone ? 12 : 24; // padding padrão do conteúdo
-
+    final double hPad = isPhone ? 12 : 24;
     return Scaffold(
       backgroundColor: theme.colorScheme.surface,
       appBar: AppBar(
@@ -166,13 +211,12 @@ class _HomePageState extends State<HomePage> {
         titleSpacing: 0,
         title: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1080), // igual ao body
+            constraints: const BoxConstraints(maxWidth: 1080),
             child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: hPad), // antes (isPhone ? 8 : 100)
+              padding: EdgeInsets.symmetric(horizontal: hPad),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  /// Pílula com e-mail + Copy + CV
                   Row(
                     children: [
                       Container(
@@ -204,16 +248,14 @@ class _HomePageState extends State<HomePage> {
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(24),
                                 onTap: () async {
-                                  await Clipboard.setData(const ClipboardData(
-                                      text: 'silviomessiaspa@gmail.com'));
+                                  final messenger = ScaffoldMessenger.of(context);
+                                  await Clipboard.setData(const ClipboardData(text: 'silviomessiaspa@gmail.com'));
                                   if (!mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('E-mail copiado!'),
-                                      behavior: SnackBarBehavior.floating,
-                                      duration: Duration(milliseconds: 1200),
-                                    ),
-                                  );
+                                  messenger.showSnackBar(const SnackBar(
+                                    content: Text('E-mail copiado!'),
+                                    behavior: SnackBarBehavior.floating,
+                                    duration: Duration(milliseconds: 1200),
+                                  ));
                                 },
                                 child: const Center(
                                   child: Text(
@@ -227,19 +269,50 @@ class _HomePageState extends State<HomePage> {
                               ),
                             ),
                             const SizedBox(width: 6),
-                            Container(
-                              height: 30,
-                              width: 30,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(24),
+                            // Botão CV
+              InkWell(
+                              borderRadius: BorderRadius.circular(24),
+                              onTap: () async {
+                openExternal('assets/pdf/curriculoSMD_25.pdf');
+                              },
+                              child: Container(
+                                height: 30,
+                                width: 30,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(24),
+                                ),
+                                child: const Center(
+                                  child: Text(
+                                    'cv',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
                               ),
-                              child: const Center(
-                                child: Text(
-                                  'cv',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 12,
+                            ),
+                            const SizedBox(width: 6),
+                            // Botão WhatsApp
+              InkWell(
+                              borderRadius: BorderRadius.circular(24),
+                              onTap: () async {
+                openExternal('https://wa.me/5591983284550');
+                              },
+                              child: Container(
+                                height: 30,
+                                width: 30,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(24),
+                                ),
+                                child: Center(
+                                  child: SvgPicture.asset(
+                                    'assets/svg/wpp.svg',
+                                    width: 18,
+                                    height: 18,
+                                    semanticsLabel: 'WhatsApp',
                                   ),
                                 ),
                               ),
@@ -249,29 +322,18 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ],
                   ),
-
-                  /// Sociais
                   Row(
                     children: [
-                      Text(
-                        'LinkedIn',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: Colors.black87,
-                        ),
+            InkWell(
+                        onTap: () async {
+              openExternal('https://www.linkedin.com/in/silvioduartepa');
+                        },
+                        child: Text('LinkedIn', style: theme.textTheme.bodyMedium?.copyWith(color: Colors.black87, decoration: TextDecoration.underline)),
                       ),
                       const SizedBox(width: 8),
-                      Container(
-                        height: 12,
-                        width: 2,
-                        color: theme.colorScheme.outlineVariant,
-                      ),
+                      Container(height: 12, width: 2, color: theme.colorScheme.outlineVariant),
                       const SizedBox(width: 8),
-                      Text(
-                        'X',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: Colors.black87,
-                        ),
-                      ),
+                      Text('X', style: theme.textTheme.bodyMedium?.copyWith(color: Colors.black87)),
                     ],
                   ),
                 ],
@@ -280,67 +342,49 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ),
-
-      /// Corpo
       body: SafeArea(
         child: Align(
           alignment: Alignment.topCenter,
-            child: SingleChildScrollView(
-            padding: EdgeInsets.symmetric(horizontal: hPad), // mantém silvio/graphic
+          child: SingleChildScrollView(
+            padding: EdgeInsets.symmetric(horizontal: hPad),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 1080),
               child: Column(
-                crossAxisAlignment:
-                    isPhone ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+                crossAxisAlignment: isPhone ? CrossAxisAlignment.center : CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 18),
-
-                  /// Título
                   Align(
                     alignment: Alignment(isPhone ? 0 : -1, 0),
                     child: GradientText(
                       'SILVIO DUARTE',
                       gradient: kTitleGradient,
                       style: (theme.textTheme.displaySmall ?? const TextStyle()).copyWith(
-                        // Apenas ajuste responsivo básico; sem forçar peso máximo
                         fontSize: isPhone ? 34 : 64,
-                        fontWeight: FontWeight.w800, // permite contraste com outros pesos
-                        // remove letterSpacing / height custom se quiser herdar
+                        fontWeight: FontWeight.w800,
                       ),
                       textAlign: isPhone ? TextAlign.center : TextAlign.left,
                     ),
                   ),
-
                   const SizedBox(height: 6),
-
-                  /// Subtítulo
                   Align(
                     alignment: Alignment(isPhone ? 0 : -1, 0),
                     child: Text(
-                      'Graphic Designer e Artist 2D•3D',
+                      'graphic designer and 2d/ 3D Artist',
                       textAlign: isPhone ? TextAlign.center : TextAlign.left,
                       style: theme.textTheme.titleMedium?.copyWith(
                         color: const Color(0xFF4E5E58),
-                        fontWeight: FontWeight.w600, // antes 800
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 28),
-
-                  /// Citação (exibia só em desktop; agora também no mobile, com layout adaptado)
                   if (isPhone) _QuoteMobile(),
-
-                  /// Herói
                   _HeroSection(
                     isPhone: isPhone,
                     hovered: _photoHovered,
                     onHoverChanged: (v) => setState(() => _photoHovered = v),
                   ),
-
                   const SizedBox(height: 24),
-
-                  /// Galeria
                   Center(
                     child: Text(
                       'Confira meus trabalhos',
@@ -353,15 +397,31 @@ class _HomePageState extends State<HomePage> {
                   const SizedBox(height: 12),
                   Builder(
                     builder: (context) {
-                      // Definição de alturas por item: assets (verticais) podem pedir mais altura.
+                      if (_galleryA.isEmpty) {
+                        return Column(
+                          children: [
+                            const SizedBox(height: 40),
+                            Text(
+                              'Nenhuma imagem carregada. Faça HOT RESTART ou clique em RECARREGAR.',
+                              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.redAccent),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 12),
+                            GradientCircleButton(
+                              onPressed: _loadGalleryDynamic,
+                              size: 48,
+                              tooltip: 'Recarregar',
+                              child: const Icon(Icons.refresh, color: Colors.white),
+                            ),
+                          ],
+                        );
+                      }
                       double itemHeightFor(String path) {
                         final bool isAsset = path.startsWith('assets/');
-                        if (isAsset) return isPhone ? 240 : 320; // altura maior para o asset vertical
-                        return isPhone ? 160 : 180; // padrão dos placeholders
+                        if (isAsset) return isPhone ? 240 : 320;
+                        return isPhone ? 160 : 180;
                       }
-                      final double galleryHeight = _gallery
-                          .map(itemHeightFor)
-                          .fold<double>(0, (m, h) => math.max(m, h));
+                      final double galleryHeight = _galleryA.map(itemHeightFor).fold<double>(0, (m, h) => math.max(m, h));
                       return SizedBox(
                         height: galleryHeight,
                         child: ScrollConfiguration(
@@ -376,60 +436,41 @@ class _HomePageState extends State<HomePage> {
                           child: ListView.separated(
                             scrollDirection: Axis.horizontal,
                             padding: EdgeInsets.symmetric(horizontal: isPhone ? 4 : 8),
-                            itemCount: _gallery.length,
+                            itemCount: _galleryA.length,
                             separatorBuilder: (_, __) => const SizedBox(width: 12),
                             itemBuilder: (context, i) {
-                              if (_gallery.isEmpty) {
-                                return const SizedBox();
-                              }
-                              final path = _gallery[i];
+                              final path = _galleryA[i];
                               final bool isAsset = path.startsWith('assets/');
                               final double targetHeight = itemHeightFor(path);
-                              // Novo comportamento: preservar altura total e permitir que a largura
-                              // se expanda conforme proporção (sem recorte vertical).
                               final Widget imageWidget = isAsset
                                   ? Image.asset(
                                       path,
                                       height: targetHeight,
                                       fit: BoxFit.fitHeight,
                                       errorBuilder: (c, err, st) => Container(
-                                        color: Colors.red.withOpacity(.1),
+                                        color: const Color.fromARGB(26, 244, 67, 54),
                                         alignment: Alignment.center,
                                         height: targetHeight,
                                         padding: const EdgeInsets.symmetric(horizontal: 8),
-                                        child: const Text(
-                                          'Erro ao carregar',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(fontSize: 10, color: Colors.red),
-                                        ),
+                                        child: const Text('Erro ao carregar', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: Colors.red)),
                                       ),
                                     )
-                                  : Image.network(
-                                      path,
-                                      height: targetHeight,
-                                      fit: BoxFit.fitHeight,
-                                    );
+                                  : Image.network(path, height: targetHeight, fit: BoxFit.fitHeight);
                               return InkWell(
-                                // Mantém regra: primeira é destaque e não abre; demais abrem pilha
-                                onTap: (i == 0 || _gallery.length <= 1)
+        onTap: (i == 0 || _galleryA.length <= 1)
                                     ? null
                                     : () {
-                                        final filtered = _gallery.sublist(1); // sem destaque
+          final filtered = _galleryA.sublist(1);
                                         final openIndex = i - 1;
-                                        Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => FullGalleryPage(
-                                              images: filtered,
-                                              initialIndex: openIndex.clamp(0, filtered.length - 1),
-                                            ),
+                                        Navigator.of(context).push(MaterialPageRoute(
+                                          builder: (_) => FullGalleryPage(
+                                            images: filtered,
+                                            initialIndex: openIndex.clamp(0, filtered.length - 1),
                                           ),
-                                        );
+                                        ));
                                       },
                                 borderRadius: BorderRadius.circular(12),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: imageWidget,
-                                ),
+                                child: ClipRRect(borderRadius: BorderRadius.circular(12), child: imageWidget),
                               );
                             },
                           ),
@@ -437,8 +478,82 @@ class _HomePageState extends State<HomePage> {
                       );
                     },
                   ),
-
-                  const SizedBox(height: 48),
+                  const SizedBox(height: 24),
+                  if (_galleryB.isNotEmpty) ...[
+                    Builder(
+                      builder: (context) {
+                        double itemHeightFor(String path) {
+                          final bool isAsset = path.startsWith('assets/');
+                          if (isAsset) return isPhone ? 240 : 320;
+                          return isPhone ? 160 : 180;
+                        }
+                        final double galleryHeight = _galleryB.map(itemHeightFor).fold<double>(0, (m, h) => math.max(m, h));
+                        return SizedBox(
+                          height: galleryHeight,
+                          child: ScrollConfiguration(
+                            behavior: ScrollConfiguration.of(context).copyWith(
+                              dragDevices: {
+                                PointerDeviceKind.touch,
+                                PointerDeviceKind.mouse,
+                                PointerDeviceKind.stylus,
+                                PointerDeviceKind.unknown,
+                              },
+                            ),
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              padding: EdgeInsets.symmetric(horizontal: isPhone ? 4 : 8),
+                              itemCount: _galleryB.length,
+                              separatorBuilder: (_, __) => const SizedBox(width: 12),
+                              itemBuilder: (context, i) {
+                                final path = _galleryB[i];
+                                final bool isAsset = path.startsWith('assets/');
+                                final double targetHeight = itemHeightFor(path);
+                                final Widget imageWidget = isAsset
+                                    ? Image.asset(
+                                        path,
+                                        height: targetHeight,
+                                        fit: BoxFit.fitHeight,
+                                        errorBuilder: (c, err, st) => Container(
+                                          color: const Color.fromARGB(26, 244, 67, 54),
+                                          alignment: Alignment.center,
+                                          height: targetHeight,
+                                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                                          child: const Text('Erro ao carregar', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: Colors.red)),
+                                        ),
+                                      )
+                                    : Image.network(path, height: targetHeight, fit: BoxFit.fitHeight);
+                                return InkWell(
+                                  onTap: (i == 0 || _galleryB.length <= 1)
+                                      ? null
+                                      : () {
+                                          final filtered = _galleryB.sublist(1);
+                                          final openIndex = i - 1;
+                                          Navigator.of(context).push(MaterialPageRoute(
+                                            builder: (_) => FullGalleryPage(
+                                              images: filtered,
+                                              initialIndex: openIndex.clamp(0, filtered.length - 1),
+                                            ),
+                                          ));
+                                        },
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: ClipRRect(borderRadius: BorderRadius.circular(12), child: imageWidget),
+                                );
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 48),
+                  ] else ...[
+                    const SizedBox(height: 16),
+                    if (_galleryA.isNotEmpty)
+                      Text('Adicione arquivos 000-b.png para popular a segunda linha.', style: theme.textTheme.bodySmall?.copyWith(color: Colors.black54)),
+                    const SizedBox(height: 48),
+                  ],
+                  // Rodapé assinatura
+                  Text('site developed by: Silvio Duarte', style: theme.textTheme.bodySmall?.copyWith(color: Colors.black54, fontStyle: FontStyle.italic)),
+                  const SizedBox(height: 24),
                 ],
               ),
             ),
@@ -617,9 +732,10 @@ class _HeroSection extends StatelessWidget {
                         shaderCallback: (bounds) =>
                             kTitleGradient.createShader(Offset.zero & bounds.size),
                         blendMode: BlendMode.srcIn,
-                        child: Transform(
+                        child: Transform.scale(
+                          scaleX: -1.0,
+                          scaleY: 1.0,
                           alignment: Alignment.topCenter,
-                          transform: Matrix4.identity()..scale(-1.0, 1.0, 1.0), // flip horizontal
                           child: const Icon(
                             Icons.format_quote,
                             size: 88,
@@ -675,9 +791,10 @@ class _QuoteMobile extends StatelessWidget {
                 child: ShaderMask(
                   shaderCallback: (bounds) => kTitleGradient.createShader(Offset.zero & bounds.size),
                   blendMode: BlendMode.srcIn,
-                  child: Transform(
+                  child: Transform.scale(
+                    scaleX: -1.0,
+                    scaleY: 1.0,
                     alignment: Alignment.topCenter,
-                    transform: Matrix4.identity()..scale(-1.0, 1.0, 1.0),
                     child: const Icon(
                       Icons.format_quote,
                       size: 56,
@@ -704,52 +821,172 @@ class _QuoteMobile extends StatelessWidget {
 }
 
 /// Página de visualização completa da galeria (todas as imagens em coluna)
-class FullGalleryPage extends StatelessWidget {
-  final List<String> images;
-  final int initialIndex;
-  const FullGalleryPage({super.key, required this.images, this.initialIndex = 0});
+class GradientCircleButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  final Widget child;
+  final double size;
+  final String? tooltip;
+  const GradientCircleButton({
+    super.key,
+    required this.onPressed,
+    required this.child,
+    this.size = 56,
+    this.tooltip,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Scaffold(
-      backgroundColor: Colors.white,
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: theme.colorScheme.primary,
-        onPressed: () => Navigator.of(context).maybePop(),
-        child: const Icon(Icons.arrow_back),
-      ),
-      body: SafeArea(
-        child: Scrollbar(
-          thumbVisibility: true,
-          child: CustomScrollView(
-            slivers: [
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
-                sliver: SliverList.builder(
-                  itemCount: images.length,
-                  itemBuilder: (context, index) {
-                    final path = images[index];
-                    final isAsset = path.startsWith('assets/');
-                    final Widget child = isAsset
-                        ? Image.asset(path, fit: BoxFit.contain)
-                        : Image.network(path, fit: BoxFit.cover);
-                    return Padding(
-                      padding: EdgeInsets.only(top: index == 0 ? 0 : 16),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: ColoredBox(
-                          color: Colors.grey.shade100,
-                          child: child,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
+    final btn = Material(
+      shape: const CircleBorder(),
+      elevation: 6,
+      color: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      child: Ink(
+        decoration: const BoxDecoration(
+          gradient: kTitleGradient,
+          shape: BoxShape.circle,
+        ),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          child: SizedBox(
+            width: size,
+            height: size,
+            child: Center(child: child),
           ),
         ),
+      ),
+    );
+    if (tooltip != null) {
+      return Tooltip(message: tooltip!, child: btn);
+    }
+    return btn;
+  }
+}
+
+class FullGalleryPage extends StatefulWidget {
+  final List<String> images;
+  final int initialIndex;
+  const FullGalleryPage({super.key, required this.images, this.initialIndex = 0});
+  @override
+  State<FullGalleryPage> createState() => _FullGalleryPageState();
+}
+
+class _FullGalleryPageState extends State<FullGalleryPage> {
+  int? _overlayIndex; // índice da imagem aberta em overlay
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final bool isWide = size.width >= 900;
+    final double columnTargetWidth = isWide ? (size.width * 3 / 5) : size.width;
+    return Scaffold(
+      backgroundColor: Colors.white,
+      floatingActionButton: GradientCircleButton(
+  onPressed: () => Navigator.of(context).maybePop(),
+  size: 56,
+  tooltip: 'Voltar',
+  child: const Icon(Icons.arrow_back, color: Colors.white),
+      ),
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Scrollbar(
+              thumbVisibility: true,
+              child: CustomScrollView(
+                slivers: [
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
+                    sliver: SliverList.builder(
+                      itemCount: widget.images.length,
+                      itemBuilder: (context, index) {
+                        final path = widget.images[index];
+                        final isAsset = path.startsWith('assets/');
+                        final Widget child = GestureDetector(
+                          onTap: () => setState(() => _overlayIndex = index),
+                          child: Hero(
+                            tag: 'gallery_$index',
+                            child: isAsset
+                                ? Image.asset(path, fit: BoxFit.contain)
+                                : Image.network(path, fit: BoxFit.cover),
+                          ),
+                        );
+                        return Padding(
+                          padding: EdgeInsets.only(top: index == 0 ? 0 : 16),
+                          child: Align(
+                            alignment: Alignment.topCenter,
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(maxWidth: columnTargetWidth),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: ColoredBox(color: Colors.grey.shade100, child: child),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_overlayIndex != null) _buildOverlay(context, _overlayIndex!),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOverlay(BuildContext context, int index) {
+    final path = widget.images[index];
+    final isAsset = path.startsWith('assets/');
+    final rawImage = isAsset ? Image.asset(path) : Image.network(path);
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () => setState(() => _overlayIndex = null),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                child: Container(color: const Color.fromARGB(150, 0, 0, 0)),
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final maxW = constraints.maxWidth;
+                final maxH = constraints.maxHeight;
+                return InteractiveViewer(
+                  minScale: 1,
+                  maxScale: 6,
+                  panEnabled: true,
+                  boundaryMargin: const EdgeInsets.all(320),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: maxW * 0.9,
+                        maxHeight: maxH * 0.9,
+                      ),
+                      child: Hero(tag: 'gallery_$index', child: rawImage),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          Positioned(
+            top: 24,
+            right: 24,
+            child: GradientCircleButton(
+              onPressed: () => setState(() => _overlayIndex = null),
+              size: 48,
+              tooltip: 'Fechar',
+              child: const Icon(Icons.close, color: Colors.white, size: 22),
+            ),
+          ),
+        ],
       ),
     );
   }
