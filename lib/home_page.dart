@@ -273,7 +273,7 @@ class _HomePageState extends State<HomePage> {
               InkWell(
                               borderRadius: BorderRadius.circular(24),
                               onTap: () async {
-                openExternal('assets/pdf/curriculoSMD_25.pdf');
+                await downloadAsset('assets/pdf/curriculoSMD_25.pdf', filename: 'curriculoSMD_25.pdf');
                               },
                               child: Container(
                                 height: 30,
