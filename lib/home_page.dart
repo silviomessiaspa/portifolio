@@ -86,7 +86,7 @@ class _HomePageState extends State<HomePage> {
   static const String _highlight = 'assets/images/graphic_design.png';
   static const String _highlightB = 'assets/images/roll2.png';
   static const Set<String> _exclude = {
-    'assets/images/eusilvio.png',
+    'assets/images/eusilvio.webp',
     'assets/images/traos.png',
   }; // imagens usadas no herói e que não devem aparecer no carrossel
 
@@ -697,7 +697,7 @@ class _HeroSection extends StatelessWidget {
                               duration: const Duration(milliseconds: 400),
                               curve: Curves.elasticOut,
                               child: Image.asset(
-                                'assets/images/eusilvio.png',
+                                'assets/images/eusilvio.webp',
                                 height: isPhone ? 400 : 600,
                                 fit: BoxFit.contain,
                                 semanticLabel: 'Foto',
