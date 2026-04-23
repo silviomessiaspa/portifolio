@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'home_page.dart';
 
 void main() => runApp(const MyApp());
+
+const String _kFontFamily = 'Montserrat';
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -11,22 +12,26 @@ class MyApp extends StatelessWidget {
     final base = ThemeData(
       colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2DC8BD)),
       useMaterial3: true,
+      fontFamily: _kFontFamily,
     );
     return MaterialApp(
       title: 'Portfólio • Silvio Duarte',
       debugShowCheckedModeBanner: false,
       theme: base.copyWith(
-        textTheme: GoogleFonts.montserratTextTheme(base.textTheme).copyWith(
-          displaySmall: GoogleFonts.montserrat(
+        textTheme: base.textTheme.copyWith(
+          displaySmall: const TextStyle(
+            fontFamily: _kFontFamily,
             fontSize: 64,
             fontWeight: FontWeight.w900,
             letterSpacing: -1.2,
             height: .95,
           ),
-          titleMedium: GoogleFonts.montserrat(
+          titleMedium: const TextStyle(
+            fontFamily: _kFontFamily,
             fontWeight: FontWeight.w700,
           ),
-          bodySmall: GoogleFonts.montserrat(
+          bodySmall: const TextStyle(
+            fontFamily: _kFontFamily,
             fontWeight: FontWeight.w400,
             height: 1.15,
           ),
