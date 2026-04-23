@@ -3,8 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 // Abrir links no Web sem depender de plugin (url_launcher não adicionado)
 // Abstrai abertura de URLs para evitar conflito com compilação WASM
-import 'url_opener_stub.dart' if (dart.library.html) 'url_opener_web.dart';
-import 'dart:convert'; // para ler AssetManifest
+import 'url_opener_stub.dart' if (dart.library.js_interop) 'url_opener_web.dart';
+// import removido pois AssetManifest não usa mais json
 import 'dart:ui' show PointerDeviceKind, ImageFilter; // para blur e dispositivos
 import 'dart:math' as math; // para calcular altura máxima dinamicamente
 
@@ -99,10 +99,10 @@ class _HomePageState extends State<HomePage> {
   // Carrega dinamicamente usando AssetManifest para incluir novas imagens adicionadas na pasta.
   Future<void> _loadGalleryDynamic() async {
     try {
-      final manifestRaw = await rootBundle.loadString('AssetManifest.json');
-      final Map<String, dynamic> manifestMap = json.decode(manifestRaw) as Map<String, dynamic>;
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      final allAssets = manifest.listAssets();
           // ===== SEPARAÇÃO POR SUFIXO -a / -b =====
-          final allImageKeys = manifestMap.keys
+          final allImageKeys = allAssets
               .where((k) => k.startsWith('assets/images/') && (k.endsWith('.png') || k.endsWith('.webp') || k.endsWith('.jpg') || k.endsWith('.jpeg')))
               .where((k) => !_exclude.contains(k))
               .toList();
@@ -177,7 +177,7 @@ class _HomePageState extends State<HomePage> {
           'assets/images/001_toca_pará_002.png',
           'assets/images/002_Ativo2.png',
         ];
-        final filtered = fallback.where((e) => manifestMap.containsKey(e)).toList();
+        final filtered = fallback.where((e) => allAssets.contains(e)).toList();
         if (filtered.isNotEmpty) {
       setState(() => _galleryA = filtered);
           // ignore: avoid_print
