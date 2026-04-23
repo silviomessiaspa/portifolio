@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -21,7 +21,7 @@ jobs:
       - name: Enable web
         run: flutter config --enable-web
       - name: Cache pub deps
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.pub-cache
@@ -42,7 +42,7 @@ jobs:
       - name: List build output
         run: ls -R build/web | head -n 100 || find build/web -maxdepth 2 -type f | head -n 100
       - name: Deploy to gh-pages
-        uses: peaceiris/actions-gh-pages@v3
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: build/web
